@@ -28,7 +28,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { TOOLS, BASE_URL } from "./tools.js";
+import { TOOLS, BASE_URL, SERVER_INSTRUCTIONS } from "./tools.js";
 
 export const SERVER_NAME = "migalabs";
 export const SERVER_VERSION = process.env.npm_package_version ?? "0.1";
@@ -40,10 +40,10 @@ console.error("API_BASE_URL is set to:", API_BASE_URL);
 // MCP server factory — creates a fresh server per request/connection
 // ---------------------------------------------------------------------------
 function createServer(): McpServer {
-  const server = new McpServer({
-    name: SERVER_NAME,
-    version: SERVER_VERSION,
-  });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   for (const tool of TOOLS) {
     // Advertise a per-call apiKey parameter so clients (who pay for API access) can supply their own key. The key is stripped from the tool args (so it isn't sent as a query parameter) and injected as the X-Api-Key header on the upstream request. Self-hosted deployments can still set API_KEY_ApiKeyAuth
@@ -246,6 +246,30 @@ export async function setupStreamableHttpServer(
   const originGuard = createOriginGuard();
   app.use("/mcp", originGuard);
 
+  // Inbound authentication (optional): if MCP_AUTH_TOKEN is set, require
+  // Authorization: Bearer <token> on all /mcp requests. When not set, the
+  // server is open (suitable for local development).
+  const authToken = process.env.MCP_AUTH_TOKEN;
+  if (authToken) {
+    app.use("/mcp", async (c, next) => {
+      const auth = c.req.header("authorization");
+      if (auth !== `Bearer ${authToken}`) {
+        return c.json(
+          {
+            jsonrpc: "2.0",
+            error: {
+              code: -32001,
+              message: "Unauthorized: invalid or missing bearer token.",
+            },
+            id: null,
+          },
+          401,
+        );
+      }
+      await next();
+    });
+  }
+
   // createMcpHandler creates a fresh server instance per HTTP request
   // (stateless StreamableHTTP). The same factory backs both modern and
   // legacy protocol eras.
@@ -264,12 +288,13 @@ export async function setupStreamableHttpServer(
   // MCP endpoint — every request gets a fresh server instance.
   app.all("/mcp", async (c) => mcpHandler.fetch(c.req.raw));
 
-  serve({ fetch: app.fetch, port }, (info) => {
+  const host = process.env.MCP_HOST ?? "127.0.0.1";
+  serve({ fetch: app.fetch, port, hostname: host }, (info) => {
     console.error(
-      `MCP StreamableHTTP Server running at http://localhost:${info.port}`,
+      `MCP StreamableHTTP Server running at http://${host}:${info.port}`,
     );
-    console.error(`- MCP Endpoint: http://localhost:${info.port}/mcp`);
-    console.error(`- Health Check: http://localhost:${info.port}/health`);
+    console.error(`- MCP Endpoint: http://${host}:${info.port}/mcp`);
+    console.error(`- Health Check: http://${host}:${info.port}/health`);
   });
 
   return app;
