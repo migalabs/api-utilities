@@ -59,11 +59,11 @@ jobs:
           sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"${VERSION}\"/" ./mcp/package.json
           echo "Version set to ${VERSION}"
 
-      - name: Publish MCP package to GitHub Packages
-        working-directory: ./mcp
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Publish MCP package to GitHub Packages
+      #   working-directory: ./mcp
+      #   run: npm publish
+      #   env:
+      #     NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pack package for Release
         working-directory: ./mcp
