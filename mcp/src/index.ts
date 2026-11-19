@@ -33,7 +33,7 @@ import { TOOLS, BASE_URL } from "./tools.js";
 export const SERVER_NAME = "migalabs";
 export const SERVER_VERSION = process.env.npm_package_version ?? "0.1";
 
-const API_BASE_URL = BASE_URL || process.env.API_BASE_URL || "";
+const API_BASE_URL = process.env.API_BASE_URL || BASE_URL || "";
 console.error("API_BASE_URL is set to:", API_BASE_URL);
 
 // ---------------------------------------------------------------------------
