@@ -67,10 +67,16 @@ jobs:
 
       - name: Pack package for Release
         working-directory: ./mcp
-        run: npm pack
+        run: |
+          # Pack and rename the archive to mcp-<version>.tgz for a cleaner release asset name
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm pack
+          PACKED=$(ls *.tgz | head -1)
+          mv "$PACKED" "mcp-${VERSION}.tgz"
+          echo "Packed as: mcp-${VERSION}.tgz"
 
       - name: Upload archive to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" ./mcp/*.tgz --clobber
+          gh release upload "${{ github.ref_name }}" ./mcp/mcp-*.tgz --clobber
