@@ -1,0 +1,16 @@
+node_modules
+.cache
+.artifacts
+
+# Generated OpenAPI spec
+openapi.json
+
+# Generated / build artifacts
+mcp/build/
+mcp/node_modules/
+mcp/src/tools.ts
+mcp/pnpm-lock.yaml
+
+# Environment files
+.env
+.env.local

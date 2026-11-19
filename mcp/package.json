@@ -1,0 +1,31 @@
+{
+  "name": "@gerardpollorebozado/api-libraries-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Migalabs API (auto-generated)",
+  "type": "module",
+  "bin": { "api-libraries-mcp": "./bin.js" },
+  "files": ["bin.js", "build", "src", "public"],
+  "engines": { "node": ">=22" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GerardPolloRebozado/api-libraries.git"
+  },
+  "scripts": {
+    "start": "node bin.js",
+    "build": "tsc && shx chmod 755 build/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "@cfworker/json-schema": "4.1.1",
+    "axios": "1.20.0",
+    "hono": "4.13.13",
+    "@hono/node-server": "2.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.17.2",
+    "typescript": "6.0.3",
+    "shx": "0.4.0"
+  }
+}

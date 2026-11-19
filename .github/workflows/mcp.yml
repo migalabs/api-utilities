@@ -1,0 +1,76 @@
+name: MCP library generator
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  generate-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js for GitHub Packages
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+
+      - name: Generate OpenAPI spec
+        shell: bash
+        run: |
+          pnpm dlx swagger2openapi "https://www.migalabs.io/docs/doc.json" -o openapi.json
+
+      - name: Install root dependencies
+        shell: bash
+        run: |
+          pnpm install --no-frozen-lockfile
+
+      - name: Generate MCP tool definitions
+        shell: bash
+        run: |
+          node scripts/generate-tools.mjs openapi.json ./mcp/src/tools.ts
+
+      - name: Build MCP server package
+        working-directory: ./mcp
+        shell: bash
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm build
+          if [ ! -f build/index.js ]; then
+            echo "ERROR: build/index.js missing after build."
+            ls -R .
+            exit 1
+          fi
+
+      - name: Set package version from release tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"${VERSION}\"/" ./mcp/package.json
+          echo "Version set to ${VERSION}"
+
+      - name: Publish MCP package to GitHub Packages
+        working-directory: ./mcp
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack package for Release
+        working-directory: ./mcp
+        run: npm pack
+
+      - name: Upload archive to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" ./mcp/*.tgz --clobber

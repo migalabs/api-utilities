@@ -1,0 +1,25 @@
+{
+  "name": "api-libraries",
+  "version": "1.0.0",
+  "description": "Libraries and utilities for using MigaLabs APIs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate:mcp-tools": "node scripts/generate-tools.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.21.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.21.0",
+  "type": "module",
+  "devDependencies": {
+    "openapi-mcp-generator": "5.0.0"
+  }
+}
