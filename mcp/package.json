@@ -1,5 +1,5 @@
 {
-  "name": "@gerardpollorebozado/api-libraries-mcp",
+  "name": "@migalabs/api-libraries-mcp",
   "version": "0.1.0",
   "description": "MCP server for Migalabs API (auto-generated)",
   "type": "module",
@@ -9,7 +9,7 @@
   "publishConfig": { "registry": "https://npm.pkg.github.com" },
   "repository": {
     "type": "git",
-    "url": "https://github.com/GerardPolloRebozado/api-libraries.git"
+    "url": "https://github.com/migalabs/api-utilities.git"
   },
   "scripts": {
     "start": "node bin.js",
