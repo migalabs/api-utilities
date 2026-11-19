@@ -46,12 +46,28 @@ function createServer(): McpServer {
   });
 
   for (const tool of TOOLS) {
+    // Advertise a per-call apiKey parameter so clients (who pay for API access) can supply their own key. The key is stripped from the tool args (so it isn't sent as a query parameter) and injected as the X-Api-Key header on the upstream request. Self-hosted deployments can still set API_KEY_ApiKeyAuth
+    const baseSchema = tool.inputSchema as Record<string, unknown> & {
+      properties?: Record<string, unknown>;
+    };
+    const inputSchema = {
+      ...baseSchema,
+      properties: {
+        ...(baseSchema.properties ?? {}),
+        apiKey: {
+          type: "string",
+          description:
+            "MigaLabs API key. Required per call unless the server is self-hosted with API_KEY_ApiKeyAuth set.",
+        },
+      },
+    };
+
     server.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: fromJsonSchema(tool.inputSchema),
+        inputSchema: fromJsonSchema(inputSchema),
         annotations: tool.annotations as {
           readOnlyHint?: boolean;
           destructiveHint?: boolean;
