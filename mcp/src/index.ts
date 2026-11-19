@@ -19,12 +19,16 @@
  * before building.
  */
 
-import { McpServer, fromJsonSchema, createMcpHandler } from "@modelcontextprotocol/server";
+import {
+  McpServer,
+  fromJsonSchema,
+  createMcpHandler,
+} from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { serve } from '@hono/node-server';
-import { TOOLS, BASE_URL } from './tools.js';
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { serve } from "@hono/node-server";
+import { TOOLS, BASE_URL } from "./tools.js";
 
 export const SERVER_NAME = "migalabs";
 export const SERVER_VERSION = process.env.npm_package_version ?? "0.1";
@@ -42,98 +46,114 @@ function createServer(): McpServer {
   });
 
   for (const tool of TOOLS) {
-    server.registerTool(tool.name, {
-      title: tool.title,
-      description: tool.description,
-      inputSchema: fromJsonSchema(tool.inputSchema),
-      annotations: tool.annotations as { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean },
-    }, async (args: unknown) => {
-      const toolArgs = args as Record<string, unknown> | undefined;
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: fromJsonSchema(tool.inputSchema),
+        annotations: tool.annotations as {
+          readOnlyHint?: boolean;
+          destructiveHint?: boolean;
+          idempotentHint?: boolean;
+          openWorldHint?: boolean;
+        },
+      },
+      async (args: unknown) => {
+        const toolArgs = args as Record<string, unknown> | undefined;
 
-      // Support per-call apiKey parameter (overrides env var).
-      // This key is stripped from args before forwarding to the upstream API,
-      // so it never reaches the Migalabs API.
-      const perCallApiKey = toolArgs?.apiKey as string | undefined;
-      const cleanArgs = { ...toolArgs };
-      delete cleanArgs.apiKey;
+        // Support per-call apiKey parameter (overrides env var).
+        // This key is stripped from args before forwarding to the upstream API,
+        // so it never reaches the Migalabs API.
+        const perCallApiKey = toolArgs?.apiKey as string | undefined;
+        const cleanArgs = { ...toolArgs };
+        delete cleanArgs.apiKey;
 
-      // Build the upstream request URL from the tool's path template and params
-      // Resolve pathTemplate against API_BASE_URL. Strip the leading '/' so it
-      // appends to the base path rather than replacing it:
-      //   https://www.migalabs.io/api + /eth/v1/... → https://www.migalabs.io/api/eth/v1/...
-      let pathWithParams = tool.pathTemplate.replace(/^\//, '');
-      for (const param of tool.executionParameters) {
-        if (param.in === 'path' && cleanArgs?.[param.name] !== undefined) {
-          pathWithParams = pathWithParams.replace(
-            `{${param.name}}`,
-            encodeURIComponent(String(cleanArgs[param.name]))
+        // Build the upstream request URL from the tool's path template and params
+        // Resolve pathTemplate against API_BASE_URL. Strip the leading '/' so it
+        // appends to the base path rather than replacing it:
+        //   https://www.migalabs.io/api + /eth/v1/... → https://www.migalabs.io/api/eth/v1/...
+        let pathWithParams = tool.pathTemplate.replace(/^\//, "");
+        for (const param of tool.executionParameters) {
+          if (param.in === "path" && cleanArgs?.[param.name] !== undefined) {
+            pathWithParams = pathWithParams.replace(
+              `{${param.name}}`,
+              encodeURIComponent(String(cleanArgs[param.name])),
+            );
+          }
+        }
+        const url = new URL(
+          pathWithParams,
+          API_BASE_URL.endsWith("/") ? API_BASE_URL : API_BASE_URL + "/",
+        );
+
+        // Query parameters
+        for (const param of tool.executionParameters) {
+          if (param.in === "query" && cleanArgs?.[param.name] !== undefined) {
+            url.searchParams.set(param.name, String(cleanArgs[param.name]));
+          }
+        }
+
+        // Build headers
+        const headers: Record<string, string> = {};
+        if (tool.requestBodyContentType)
+          headers["Content-Type"] = tool.requestBodyContentType;
+
+        // API key auth: per-call parameter takes precedence over env var.
+        // The key is read at request time (not build time), so it is never
+        // embedded in the built code.
+        let apiKey = perCallApiKey;
+        if (!apiKey) {
+          for (const req of tool.securityRequirements) {
+            for (const schemeName of Object.keys(req)) {
+              const envToken = process.env[`API_KEY_${schemeName}`];
+              if (envToken) {
+                apiKey = envToken;
+                break;
+              }
+            }
+            if (apiKey) break;
+          }
+        }
+        if (apiKey) headers["X-Api-Key"] = apiKey;
+
+        const response = await fetch(url.toString(), {
+          method: tool.method.toUpperCase(),
+          headers,
+        });
+
+        // Parse structured error response from the API so the agent can
+        // read error messages without inspecting raw HTML/JSON.
+        if (!response.ok) {
+          const body = await response.text();
+          let errorDetail = body;
+          let errorTitle = "Upstream API error";
+          let errorStatus = response.status;
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed.detail) errorDetail = parsed.detail;
+            if (parsed.title) errorTitle = parsed.title;
+            if (parsed.status) errorStatus = parsed.status;
+            if (parsed.type) errorTitle = `${parsed.type}: ${parsed.title}`;
+          } catch {
+            // Not JSON, use raw body as detail
+          }
+          throw new Error(
+            JSON.stringify({
+              error: true,
+              status: errorStatus,
+              title: errorTitle,
+              detail: errorDetail,
+            }),
           );
         }
-      }
-      const url = new URL(pathWithParams, API_BASE_URL.endsWith('/') ? API_BASE_URL : API_BASE_URL + '/');
 
-      // Query parameters
-      for (const param of tool.executionParameters) {
-        if (param.in === 'query' && cleanArgs?.[param.name] !== undefined) {
-          url.searchParams.set(param.name, String(cleanArgs[param.name]));
-        }
-      }
-
-      // Build headers
-      const headers: Record<string, string> = {};
-      if (tool.requestBodyContentType) headers['Content-Type'] = tool.requestBodyContentType;
-
-      // API key auth: per-call parameter takes precedence over env var.
-      // The key is read at request time (not build time), so it is never
-      // embedded in the built code.
-      let apiKey = perCallApiKey;
-      if (!apiKey) {
-        for (const req of tool.securityRequirements) {
-          for (const schemeName of Object.keys(req)) {
-            const envToken = process.env[`API_KEY_${schemeName}`];
-            if (envToken) { apiKey = envToken; break; }
-          }
-          if (apiKey) break;
-        }
-      }
-      if (apiKey) headers['X-Api-Key'] = apiKey;
-
-      const response = await fetch(url.toString(), {
-        method: tool.method.toUpperCase(),
-        headers,
-      });
-
-      // Parse structured error response from the API so the agent can
-      // read error messages without inspecting raw HTML/JSON.
-      if (!response.ok) {
         const body = await response.text();
-        let errorDetail = body;
-        let errorTitle = 'Upstream API error';
-        let errorStatus = response.status;
-        try {
-          const parsed = JSON.parse(body);
-          if (parsed.detail) errorDetail = parsed.detail;
-          if (parsed.title) errorTitle = parsed.title;
-          if (parsed.status) errorStatus = parsed.status;
-          if (parsed.type) errorTitle = `${parsed.type}: ${parsed.title}`;
-        } catch {
-          // Not JSON, use raw body as detail
-        }
-        throw new Error(
-          JSON.stringify({
-            error: true,
-            status: errorStatus,
-            title: errorTitle,
-            detail: errorDetail,
-          })
-        );
-      }
-
-      const body = await response.text();
-      return {
-        content: [{ type: 'text', text: body }],
-      };
-    });
+        return {
+          content: [{ type: "text", text: body }],
+        };
+      },
+    );
   }
 
   return server;
@@ -148,29 +168,42 @@ type AppEnv = { Variables: { inboundPrincipal?: string } };
  */
 function createOriginGuard() {
   const allowed = new Set(
-    (process.env.MCP_ALLOWED_ORIGINS ?? '')
-      .split(',')
-      .map((origin) => origin.trim().replace(/\/+$/, ''))
-      .filter(Boolean)
+    (process.env.MCP_ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/+$/, ""))
+      .filter(Boolean),
   );
-  const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-  return async (c: { req: { header: (name: string) => string | undefined }; json: (body: unknown, status?: number) => unknown; }, next: () => Promise<unknown>) => {
-    const origin = c.req.header('origin');
+  const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+  return async (
+    c: {
+      req: { header: (name: string) => string | undefined };
+      json: (body: unknown, status?: number) => unknown;
+    },
+    next: () => Promise<unknown>,
+  ) => {
+    const origin = c.req.header("origin");
     if (origin !== undefined) {
-      let host = '';
+      let host = "";
       try {
         host = new URL(origin).hostname;
       } catch {
         // "null" and malformed origins fall through to the rejection below.
       }
-      if (!loopbackHosts.has(host) && !allowed.has(origin.replace(/\/+$/, ''))) {
+      if (
+        !loopbackHosts.has(host) &&
+        !allowed.has(origin.replace(/\/+$/, ""))
+      ) {
         return c.json(
           {
-            jsonrpc: '2.0',
-            error: { code: -32000, message: 'Forbidden: origin not allowed (set MCP_ALLOWED_ORIGINS).' },
+            jsonrpc: "2.0",
+            error: {
+              code: -32000,
+              message:
+                "Forbidden: origin not allowed (set MCP_ALLOWED_ORIGINS).",
+            },
             id: null,
           },
-          403
+          403,
         );
       }
     }
@@ -185,39 +218,43 @@ function createOriginGuard() {
  * return type would reference Hono's internal BlankSchema).
  */
 export async function setupStreamableHttpServer(
-  port = 3000
+  port = 3000,
 ): Promise<Hono<AppEnv>> {
   const app = new Hono<AppEnv>();
 
-  app.use('*', cors({ exposeHeaders: ['mcp-protocol-version', 'www-authenticate'] }));
+  app.use(
+    "*",
+    cors({ exposeHeaders: ["mcp-protocol-version", "www-authenticate"] }),
+  );
 
   const originGuard = createOriginGuard();
-  app.use('/mcp', originGuard);
+  app.use("/mcp", originGuard);
 
   // createMcpHandler creates a fresh server instance per HTTP request
   // (stateless StreamableHTTP). The same factory backs both modern and
   // legacy protocol eras.
-  const mcpHandler = createMcpHandler(
-    () => createServer(),
-    { onerror: (error) => console.error('MCP request error:', error) }
-  );
+  const mcpHandler = createMcpHandler(() => createServer(), {
+    onerror: (error) => console.error("MCP request error:", error),
+  });
 
-  app.get('/health', (c) => {
-    return c.json({ status: 'OK', server: SERVER_NAME, version: SERVER_VERSION });
+  app.get("/health", (c) => {
+    return c.json({
+      status: "OK",
+      server: SERVER_NAME,
+      version: SERVER_VERSION,
+    });
   });
 
   // MCP endpoint — every request gets a fresh server instance.
-  app.all('/mcp', async (c) => mcpHandler.fetch(c.req.raw));
+  app.all("/mcp", async (c) => mcpHandler.fetch(c.req.raw));
 
-  serve(
-    { fetch: app.fetch, port },
-    (info) => {
-      console.error(`MCP StreamableHTTP Server running at http://localhost:${info.port}`);
-      console.error(`- MCP Endpoint: http://localhost:${info.port}/mcp`);
-      console.error(`- Health Check: http://localhost:${info.port}/health`);
-      console.error(`- Playground: http://localhost:${info.port}/`);
-    }
-  );
+  serve({ fetch: app.fetch, port }, (info) => {
+    console.error(
+      `MCP StreamableHTTP Server running at http://localhost:${info.port}`,
+    );
+    console.error(`- MCP Endpoint: http://localhost:${info.port}/mcp`);
+    console.error(`- Health Check: http://localhost:${info.port}/health`);
+  });
 
   return app;
 }
@@ -226,10 +263,10 @@ export async function setupStreamableHttpServer(
 // Entrypoint
 // ---------------------------------------------------------------------------
 async function main() {
-  const transport = process.env.MCP_TRANSPORT ?? 'streamable-http';
+  const transport = process.env.MCP_TRANSPORT ?? "streamable-http";
 
-  if (transport === 'stdio') {
-    console.error('[api-libraries-mcp] starting stdio server…');
+  if (transport === "stdio") {
+    console.error("[api-libraries-mcp] starting stdio server…");
     await serveStdio(createServer);
     return;
   }
@@ -240,6 +277,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Failed to start server:', error);
+  console.error("Failed to start server:", error);
   process.exit(1);
 });
