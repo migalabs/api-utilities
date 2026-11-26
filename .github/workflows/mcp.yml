@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 jobs:
-  generate-and-publish:
+  generate-and-stage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -22,7 +22,7 @@ jobs:
       - name: Set up Node.js for npm
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
       - name: Generate OpenAPI spec
@@ -59,9 +59,22 @@ jobs:
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" ./mcp/package.json
           echo "Version set to ${VERSION}"
 
-      - name: Publish MCP package to npm
+      # Staging uploads the tarball without publishing it and without a 2FA
+      # prompt. Approve later with:
+      #   npm stage list @migalabs/mcp
+      #   npm stage approve <stage-id>
+      - name: Stage MCP package on npm
         working-directory: ./mcp
-        run: npm publish --access public --provenance
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Prereleases need an explicit tag; stable versions use `latest`.
+          if [[ "$VERSION" == *-* ]]; then
+            TAG="beta"
+          else
+            TAG="latest"
+          fi
+          npm stage publish --access public --tag "$TAG" --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
