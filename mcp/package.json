@@ -1,16 +1,38 @@
 {
-  "name": "@migalabs/api-libraries-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for Migalabs API (auto-generated)",
+  "name": "@migalabs/mcp",
+  "version": "0.1.0-beta.0",
+  "description": "MCP server for the MigaLabs Ethereum API — query blocks, validators, staking entities, blobs and more from your AI agent.",
+  "license": "MIT",
+  "homepage": "https://docs.migalabs.io/mcp",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ethereum",
+    "migalabs",
+    "beacon-chain"
+  ],
   "type": "module",
-  "bin": { "api-libraries-mcp": "./bin.js" },
-  "files": ["bin.js", "build", "src", "public"],
-  "engines": { "node": ">=22" },
-  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "bin": {
+    "migalabs-mcp": "./bin.js"
+  },
+  "files": [
+    "bin.js",
+    "build",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/migalabs/api-utilities.git"
+    "url": "https://github.com/migalabs/api-utilities.git",
+    "directory": "mcp"
   },
+  "bugs": "https://github.com/migalabs/api-utilities/issues",
   "scripts": {
     "start": "node bin.js",
     "build": "tsc && shx chmod 755 build/index.js",
@@ -19,7 +41,6 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
     "@cfworker/json-schema": "4.1.1",
-    "axios": "1.20.0",
     "hono": "4.13.13",
     "@hono/node-server": "2.1.5"
   },

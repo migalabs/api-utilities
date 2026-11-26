@@ -122,28 +122,16 @@ function createServer(ctx?: McpRequestContext): McpServer {
         // API key auth: use the caller's key from the MCP client's headers.
         // It is read from the inbound request at call time, so it is never
         // embedded in built code and never appears in tool arguments.
-        // The env var fallback is only for local/stdio self-hosting, where
-        // there is no inbound HTTP request.
-        let apiKey = inboundApiKey;
-        if (!apiKey) {
-          for (const req of tool.securityRequirements) {
-            for (const schemeName of Object.keys(req)) {
-              const envToken = process.env[`API_KEY_${schemeName}`];
-              if (envToken) {
-                apiKey = envToken;
-                break;
-              }
-            }
-            if (apiKey) break;
-          }
-        }
+        // The MIGALABS_API_KEY env var is only used for local/stdio MCP
+        // clients, where there is no inbound HTTP request.
+        const apiKey = inboundApiKey || process.env.MIGALABS_API_KEY;
         if (!apiKey) {
           throw new Error(
             JSON.stringify({
               error: true,
               title: "Missing API key",
               detail:
-                "Set X-Api-Key: <your MigaLabs API key> in your MCP client config.",
+                "No API key provided. Set X-Api-Key in your MCP client config (HTTP) or the MIGALABS_API_KEY env var (stdio).",
             }),
           );
         }

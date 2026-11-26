@@ -11,15 +11,104 @@ Utilities and libraries for working with the MigaLabs API — data about the Eth
 
 The `mcp/` folder contains an MCP (Model Context Protocol) server. Think of it as a plug-in that lets your AI assistant (Claude Code, OpenCode, etc.) read live Ethereum data from MigaLabs.
 
+The recommended way to run it is **locally over stdio**. The MCP client starts the server for you and passes your key through its config. A hosted HTTP server is also available if you don't want to run anything locally.
+
 ### 1. Get an API key
 
 The MigaLabs API needs an API key. Create an account at [migalabs.io](https://www.migalabs.io) to get one.
 
-**Never paste your key into a chat.** Put it in your MCP client configuration as an `X-Api-Key` header instead. The hosted MCP server reads that header on each request and forwards it to the MigaLabs API as-is. Replace `YOUR_API_KEY` in the config below with your key.
+**Never paste your key into a chat.** Keep it in your MCP client configuration instead. Replace `YOUR_API_KEY` in the configs below with your key.
 
-### 2. Add the server to your agent
+### 2. Run locally with stdio (recommended)
 
-Connect your agent to the hosted MCP server at:
+Your MCP client launches the server directly from npm — no checkout, build or HTTP server needed, and no header to configure. Run it with `npx -y @migalabs/mcp` and replace `YOUR_API_KEY` with your key.
+
+<details>
+<summary>OpenCode</summary>
+
+Add this to your `opencode.json` (or `opencode.jsonc`):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "migalabs": {
+        "type": "local",
+        "command": ["npx", "-y", "@migalabs/mcp"],
+        "environment": {
+          "MCP_TRANSPORT": "stdio",
+          "MIGALABS_API_KEY": "YOUR_API_KEY",
+        },
+      },
+    },
+  },
+}
+```
+
+Or use the CLI:
+
+```bash
+opencode mcp add migalabs --env MCP_TRANSPORT=stdio --env MIGALABS_API_KEY=YOUR_API_KEY -- npx -y @migalabs/mcp
+```
+
+</details>
+
+<details>
+<summary>Claude Code</summary>
+
+Add this to your `.mcp.json` file:
+
+```json
+{
+  "mcpServers": {
+    "migalabs": {
+      "command": "npx",
+      "args": ["-y", "@migalabs/mcp"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "MIGALABS_API_KEY": "YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Or use the CLI:
+
+```bash
+claude mcp add --env MCP_TRANSPORT=stdio --env MIGALABS_API_KEY=YOUR_API_KEY --transport stdio migalabs -- npx -y @migalabs/mcp
+```
+
+</details>
+
+<details>
+<summary>Cursor</summary>
+
+Add this to your `.cursor/mcp.json` (project-level) or `~/.cursor/mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "migalabs": {
+      "command": "npx",
+      "args": ["-y", "@migalabs/mcp"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "MIGALABS_API_KEY": "YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+The key is read from `MIGALABS_API_KEY` at runtime and forwarded to the MigaLabs API; it is never passed as a tool argument or through the chat.
+
+### 3. Connect to the hosted server (optional)
+
+Alternatively, connect your agent to the hosted MCP server at:
 
 ```
 https://mcp.migalabs.io/mcp
@@ -107,20 +196,7 @@ Add this to your `.cursor/mcp.json` (project-level) or `~/.cursor/mcp.json` (glo
 
 </details>
 
-<details>
-<summary>Antigravity</summary>
-
-Add the MCP server in Antigravity settings pointing to:
-
-```
-https://mcp.migalabs.io/mcp
-```
-
-and set its `X-Api-Key` header to your API key.
-
-</details>
-
-Once connected, your agent can call tools like "get the latest Ethereum block". Your key is read from the MCP client config and applied by the server — it is never passed through the agent or the chat.
+Once connected, your agent can call tools like "get the latest Ethereum block".
 
 ### What data can I get?
 
@@ -128,7 +204,7 @@ Once connected, your agent can call tools like "get the latest Ethereum block". 
 - Validator details, activation and consolidation queues
 - Staking entities and rewards
 - Block builders and relays
-- Blob / data-availability stats
+- Blob data-availability stats
   and more. See the full API reference at [docs.migalabs.io](https://docs.migalabs.io).
   All tools default to Ethereum `mainnet` however `hoodi` and `sepolia` testnets are also supported.
 

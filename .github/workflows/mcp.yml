@@ -19,11 +19,11 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Set up Node.js for GitHub Packages
+      - name: Set up Node.js for npm
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://npm.pkg.github.com"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Generate OpenAPI spec
         shell: bash
@@ -56,14 +56,14 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"${VERSION}\"/" ./mcp/package.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" ./mcp/package.json
           echo "Version set to ${VERSION}"
 
-      # - name: Publish MCP package to GitHub Packages
-      #   working-directory: ./mcp
-      #   run: npm publish
-      #   env:
-      #     NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish MCP package to npm
+        working-directory: ./mcp
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Pack package for Release
         working-directory: ./mcp
