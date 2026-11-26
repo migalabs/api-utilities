@@ -15,6 +15,12 @@
  *   streamable-http (default) — HTTP server on PORT (default 3000)
  *   stdio                   — stdio transport for local MCP clients
  *
+ * Authentication is per user, not per server: the MCP client sends the
+ * user's MigaLabs API key once in its config as an `X-Api-Key` header. We
+ * read it from the inbound request and forward it to the upstream API. The
+ * agent never sees the key and there is no apiKey tool argument to paste
+ * it into.
+ *
  * This file is copied into the ./mcp directory by the release workflow
  * before building.
  */
@@ -24,6 +30,7 @@ import {
   fromJsonSchema,
   createMcpHandler,
 } from "@modelcontextprotocol/server";
+import type { McpRequestContext } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -36,38 +43,42 @@ export const SERVER_VERSION = process.env.npm_package_version ?? "0.1";
 const API_BASE_URL = process.env.API_BASE_URL || BASE_URL || "";
 console.error("API_BASE_URL is set to:", API_BASE_URL);
 
+/**
+ * Read the caller's MigaLabs API key from an inbound MCP request.
+ *
+ * Hosted usage: the user puts their own key in their MCP client config once,
+ * e.g. `X-Api-Key: <their-api-key>`. It is sent on every MCP request, so the
+ * agent never needs to know it and never has to ask the user to paste it
+ * into the chat.
+ *
+ * The key is only ever used to build the upstream request header. It is
+ * never logged, returned to the client, or exposed as a tool argument.
+ */
+function extractApiKey(request?: Request): string | undefined {
+  if (!request) return undefined;
+  return request.headers.get("x-api-key")?.trim() || undefined;
+}
+
 // ---------------------------------------------------------------------------
 // MCP server factory — creates a fresh server per request/connection
 // ---------------------------------------------------------------------------
-function createServer(): McpServer {
+function createServer(ctx?: McpRequestContext): McpServer {
+  // Per-request credential from the MCP client's headers. `requestInfo` is
+  // present for HTTP requests; stdio callers fall back to the env var below.
+  const inboundApiKey = extractApiKey(ctx?.requestInfo);
+
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
   for (const tool of TOOLS) {
-    // Advertise a per-call apiKey parameter so clients (who pay for API access) can supply their own key. The key is stripped from the tool args (so it isn't sent as a query parameter) and injected as the X-Api-Key header on the upstream request. Self-hosted deployments can still set API_KEY_ApiKeyAuth
-    const baseSchema = tool.inputSchema as Record<string, unknown> & {
-      properties?: Record<string, unknown>;
-    };
-    const inputSchema = {
-      ...baseSchema,
-      properties: {
-        ...(baseSchema.properties ?? {}),
-        apiKey: {
-          type: "string",
-          description:
-            "MigaLabs API key. Required per call unless the server is self-hosted with API_KEY_ApiKeyAuth set.",
-        },
-      },
-    };
-
     server.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: fromJsonSchema(inputSchema),
+        inputSchema: fromJsonSchema(tool.inputSchema),
         annotations: tool.annotations as {
           readOnlyHint?: boolean;
           destructiveHint?: boolean;
@@ -76,14 +87,7 @@ function createServer(): McpServer {
         },
       },
       async (args: unknown) => {
-        const toolArgs = args as Record<string, unknown> | undefined;
-
-        // Support per-call apiKey parameter (overrides env var).
-        // This key is stripped from args before forwarding to the upstream API,
-        // so it never reaches the Migalabs API.
-        const perCallApiKey = toolArgs?.apiKey as string | undefined;
-        const cleanArgs = { ...toolArgs };
-        delete cleanArgs.apiKey;
+        const toolArgs = (args ?? {}) as Record<string, unknown>;
 
         // Build the upstream request URL from the tool's path template and params
         // Resolve pathTemplate against API_BASE_URL. Strip the leading '/' so it
@@ -91,10 +95,10 @@ function createServer(): McpServer {
         //   https://www.migalabs.io/api + /eth/v1/... → https://www.migalabs.io/api/eth/v1/...
         let pathWithParams = tool.pathTemplate.replace(/^\//, "");
         for (const param of tool.executionParameters) {
-          if (param.in === "path" && cleanArgs?.[param.name] !== undefined) {
+          if (param.in === "path" && toolArgs[param.name] !== undefined) {
             pathWithParams = pathWithParams.replace(
               `{${param.name}}`,
-              encodeURIComponent(String(cleanArgs[param.name])),
+              encodeURIComponent(String(toolArgs[param.name])),
             );
           }
         }
@@ -105,8 +109,8 @@ function createServer(): McpServer {
 
         // Query parameters
         for (const param of tool.executionParameters) {
-          if (param.in === "query" && cleanArgs?.[param.name] !== undefined) {
-            url.searchParams.set(param.name, String(cleanArgs[param.name]));
+          if (param.in === "query" && toolArgs[param.name] !== undefined) {
+            url.searchParams.set(param.name, String(toolArgs[param.name]));
           }
         }
 
@@ -115,10 +119,12 @@ function createServer(): McpServer {
         if (tool.requestBodyContentType)
           headers["Content-Type"] = tool.requestBodyContentType;
 
-        // API key auth: per-call parameter takes precedence over env var.
-        // The key is read at request time (not build time), so it is never
-        // embedded in the built code.
-        let apiKey = perCallApiKey;
+        // API key auth: use the caller's key from the MCP client's headers.
+        // It is read from the inbound request at call time, so it is never
+        // embedded in built code and never appears in tool arguments.
+        // The env var fallback is only for local/stdio self-hosting, where
+        // there is no inbound HTTP request.
+        let apiKey = inboundApiKey;
         if (!apiKey) {
           for (const req of tool.securityRequirements) {
             for (const schemeName of Object.keys(req)) {
@@ -131,7 +137,17 @@ function createServer(): McpServer {
             if (apiKey) break;
           }
         }
-        if (apiKey) headers["X-Api-Key"] = apiKey;
+        if (!apiKey) {
+          throw new Error(
+            JSON.stringify({
+              error: true,
+              title: "Missing API key",
+              detail:
+                "Set X-Api-Key: <your MigaLabs API key> in your MCP client config.",
+            }),
+          );
+        }
+        headers["X-Api-Key"] = apiKey;
 
         const response = await fetch(url.toString(), {
           method: tool.method.toUpperCase(),
@@ -240,40 +256,50 @@ export async function setupStreamableHttpServer(
 
   app.use(
     "*",
-    cors({ exposeHeaders: ["mcp-protocol-version", "www-authenticate"] }),
+    cors({
+      exposeHeaders: ["mcp-protocol-version"],
+      // Required so browser-based MCP clients can send the user's key and
+      // the protocol headers on cross-origin requests.
+      allowHeaders: [
+        "Content-Type",
+        "X-Api-Key",
+        "MCP-Protocol-Version",
+        "Mcp-Session-Id",
+        "Last-Event-ID",
+      ],
+    }),
   );
 
   const originGuard = createOriginGuard();
   app.use("/mcp", originGuard);
 
-  // Inbound authentication (optional): if MCP_AUTH_TOKEN is set, require
-  // Authorization: Bearer <token> on all /mcp requests. When not set, the
-  // server is open (suitable for local development).
-  const authToken = process.env.MCP_AUTH_TOKEN;
-  if (authToken) {
-    app.use("/mcp", async (c, next) => {
-      const auth = c.req.header("authorization");
-      if (auth !== `Bearer ${authToken}`) {
-        return c.json(
-          {
-            jsonrpc: "2.0",
-            error: {
-              code: -32001,
-              message: "Unauthorized: invalid or missing bearer token.",
-            },
-            id: null,
+  // Every /mcp request must carry the caller's own API key, configured once
+  // in their MCP client as an `X-Api-Key` header. The agent never sees it.
+  // We only check that a credential is present here; validity is decided by
+  // the upstream MigaLabs API when the tool actually runs.
+  app.use("/mcp", async (c, next) => {
+    if (!extractApiKey(c.req.raw)) {
+      return c.json(
+        {
+          jsonrpc: "2.0",
+          error: {
+            code: -32001,
+            message:
+              "Unauthorized: set X-Api-Key: <your MigaLabs API key> in your MCP client config.",
           },
-          401,
-        );
-      }
-      await next();
-    });
-  }
+          id: null,
+        },
+        401,
+      );
+    }
+    await next();
+  });
 
   // createMcpHandler creates a fresh server instance per HTTP request
   // (stateless StreamableHTTP). The same factory backs both modern and
-  // legacy protocol eras.
-  const mcpHandler = createMcpHandler(() => createServer(), {
+  // legacy protocol eras. Pass the SDK's per-request context through so
+  // tools can read the caller's key from the inbound headers.
+  const mcpHandler = createMcpHandler((ctx) => createServer(ctx), {
     onerror: (error) => console.error("MCP request error:", error),
   });
 

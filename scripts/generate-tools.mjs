@@ -183,7 +183,9 @@ for (const [tag, count] of sortedTags) {
   );
 }
 instructionsLines.push("");
-instructionsLines.push("AUTHENTICATION: Pass apiKey in tool arguments");
+instructionsLines.push(
+  "AUTHENTICATION: Handled automatically by the MCP connection using the credentials in the MCP client configuration. Do not ask the user for an API key and do not pass one as a tool argument.",
+);
 instructionsLines.push("");
 instructionsLines.push(
   'All tools accept a "network" parameter (mainnet, hoodi, sepolia). Most are read-only (GET).',
